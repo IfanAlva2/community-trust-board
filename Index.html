@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Community Trust Board (Clean PoC)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f9f9f9; }
+    h1 { color: #333; }
+    input, button { margin: 5px 0; padding: 8px; width: 100%; }
+    .entry { border: 1px solid #ccc; padding: 10px; margin-top: 10px; background: #fff; }
+    .proof { font-size: 0.9em; color: #666; margin-top: 5px; }
+    .vote-btn { margin: 3px; }
+    .comment { margin-left: 10px; font-style: italic; }
+  </style>
+</head>
+<body>
+
+<h1>Community Trust Board</h1>
+
+<!-- Input for proof creation -->
+<input type="text" id="postUrl" placeholder="Paste X post URL here">
+<button id="createEntryBtn">Create Proof Entry</button>
+<div id="submitStatus"></div>
+
+<hr>
+<h2>Entries</h2>
+<div id="entries"></div>
+
+<script>
+// Utility: SHA-256 hash
+async function sha256Hex(message) {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// Mock Soundness Layer response
+async function mockSL(data) {
+  return {
+    proofId: "proof_" + Math.random().toString(36).substring(2, 10),
+    zkProof: "dummyZkProof_" + Math.random().toString(36).substring(2, 8),
+    ts: new Date().toISOString()
+  };
+}
+
+// Create new entry or reuse existing one
+document.getElementById("createEntryBtn").onclick = async () => {
+  const url = document.getElementById("postUrl").value.trim();
+  const submitStatus = document.getElementById("submitStatus");
+
+  if (!url) {
+    alert("Please enter a post URL");
+    return;
+  }
+
+  let entries = JSON.parse(localStorage.getItem("entries") || "[]");
+
+  // ✅ Check if entry already exists
+  const existingIndex = entries.findIndex(e => e.url === url);
+  if (existingIndex !== -1) {
+    submitStatus.textContent = "Entry already exists. Opening it...";
+    renderEntries();
+    document.getElementById(`entry_${existingIndex}`).scrollIntoView({ behavior: "smooth" });
+    return;
+  }
+
+  submitStatus.textContent = "Generating proof...";
+
+  const hash = await sha256Hex(url);
+  const sl = await mockSL({ type: "post", url, hash, ts: Date.now() });
+
+  entries.push({ url, hash, proof: sl, votes: { legit: 0, scam: 0, unsure: 0 }, comments: [] });
+  localStorage.setItem("entries", JSON.stringify(entries));
+
+  renderEntries();
+  submitStatus.textContent = "Proof entry created!";
+};
+
+// Render entries
+function renderEntries() {
+  const entries = JSON.parse(localStorage.getItem("entries") || "[]");
+  const container = document.getElementById("entries");
+  container.innerHTML = "";
+
+  entries.forEach((entry, index) => {
+    const div = document.createElement("div");
+    div.className = "entry";
+    div.id = `entry_${index}`;
+    div.innerHTML = `
+      <b>Post URL:</b> <a href="${entry.url}" target="_blank">${entry.url}</a><br>
+      <div class="proof">ProofId: ${entry.proof.proofId}, Hash: ${entry.hash.substring(0,12)}..., Timestamp: ${entry.proof.ts}</div>
+      <p><b>Votes:</b> Legit ${entry.votes.legit} | Scam ${entry.votes.scam} | Unsure ${entry.votes.unsure}</p>
+      <button class="vote-btn" onclick="vote(${index}, 'legit')">Legit</button>
+      <button class="vote-btn" onclick="vote(${index}, 'scam')">Scam</button>
+      <button class="vote-btn" onclick="vote(${index}, 'unsure')">Unsure</button>
+      <br><br>
+      <input type="text" id="commentInput_${index}" placeholder="Add a comment">
+      <button onclick="addComment(${index})">Submit Comment</button>
+      <div id="comments_${index}"></div>
+    `;
+    container.appendChild(div);
+
+    // Render comments
+    const commentDiv = document.getElementById(`comments_${index}`);
+    entry.comments.forEach(c => {
+      const cDiv = document.createElement("div");
+      cDiv.className = "comment";
+      cDiv.textContent = `- ${c.text} (ProofId: ${c.proofId})`;
+      commentDiv.appendChild(cDiv);
+    });
+  });
+}
+
+// Voting
+function vote(index, type) {
+  const entries = JSON.parse(localStorage.getItem("entries") || "[]");
+  const entry = entries[index];
+  entry.votes[type]++;
+  localStorage.setItem("entries", JSON.stringify(entries));
+  renderEntries();
+}
+
+// Commenting
+async function addComment(index) {
+  const input = document.getElementById(`commentInput_${index}`);
+  const text = input.value.trim();
+  if (!text) return;
+  const proof = await mockSL({ type: "comment", text });
+  const entries = JSON.parse(localStorage.getItem("entries") || "[]");
+  entries[index].comments.push({ text, proofId: proof.proofId });
+  localStorage.setItem("entries", JSON.stringify(entries));
+  renderEntries();
+}
+
+// Initial render
+renderEntries();
+</script>
+</body>
+</html>
